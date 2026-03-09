@@ -3,48 +3,85 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define MAX_PARTS 10
-#define MAX_PART_LEN 256
 #define MAX_FILENAME 1024
+#define MAX_SONGNAME 64 
+#define MAX_DIFFICULTY 6 
+#define MAX_SCORE 8 
+#define MAX_RATING 5 
+#define MAX_DATETIME 19
 
 typedef struct {
-    char parts[MAX_PARTS][MAX_PART_LEN];
-    int  count;
-} ParsedFilename;
+    char song[MAX_SONGNAME];
+    char difficulty[MAX_DIFFICULTY];
+    char score[MAX_SCORE];
+    char rating[MAX_RATING];
+    char datetime[MAX_DATETIME];
+    int valid;
+} scoreEntry;
 
-ParsedFilename parse_filename(const char *filename) {
-    ParsedFilename result = {0};
+scoreEntry parse_files(const char *filename) {
+    scoreEntry entry = {0};
 
-    // Strip file extension if present
+    /* strip file extension */
+
     char base[MAX_FILENAME];
-    strncpy(base, filename, MAX_FILENAME - 1);
-    char *dot = strrchr(base, '.');
+    strncpy(base, filename, MAX_FILENAME - 1); // strncpy() copies a specific number of characters from a source
+                                               // Example: strncpy(destination, source, size)
+    char *dot = strrchr(base, '.'); // strrchr() locates the last occurrence of a specified string
+                                    // Example: strrchr(stringToSearch, characterSearchedFor)
+                                    // strchr() searches for the first, strrchr() searches for the last
     if (dot) *dot = '\0';
 
-    // Tokenize on underscores
-    char *token = strtok(base, "_");
-    while (token != NULL && result.count < MAX_PARTS) {
-        strncpy(result.parts[result.count++], token, MAX_PART_LEN - 1);
-        token = strtok(NULL, "_");
+    // Split filename into tokens
+    char *tokens[64];
+    int token_count = 0;
+
+    char *p = base;
+    while (*p && token_count < 64) {
+        tokens[token_count++] = p;
+        char *next = strchr(p, '_');
+        if (!next) break;
+        *next = '\0';
+        p = next + 1;
     }
 
-    return result;
+    // Looking for 4 tokens: song, difficulty, score, rating
+    // Song
+    if (token_count < 4) return entry;
+    strncpy(entry.song, tokens[0], MAX_SONGNAME - 1);
+
+    // Rating (sans DateTime from end of filename)
+    char rating_raw[MAX_RATING];
+    strncpy(rating_raw, tokens[token_count - 1], MAX_RATING - 1);
+    char *space = strchr(rating_raw, ' ');
+    if (space) {
+        *space = '\0';
+        strncpy(entry.datetime, space + 1, MAX_DATETIME - 1);
+    }
+    strncpy(entry.rating, rating_raw, MAX_RATING - 1);
+
+    strncpy(entry.score, tokens[token_count - 2], MAX_SCORE - 1);
+    strncpy(entry.difficulty, tokens[token_count - 3], MAX_DIFFICULTY - 1);
+
+    // Song name, rejoining middle tokens with spaces
+    int song_start = 1;
+    int song_end = token_count - 4; // inclusive
+    if (song_start > song_end) return entry;
+
+    char song_buf[MAX_FILENAME] = {0};
+    for (int i = song_start; i <= song_end; i++) {
+        strncat(song_buf, tokens[i], MAX_FILENAME - strlen(song_buf) - 1);
+        if (i < song_end) strncat(song_buf, " ", MAX_FILENAME - strlen(song_buf) - 1);
+    }
+    strncpy(entry.song, song_buf, MAX_SONGNAME - 1);
+
+    entry.valid = 1;
+    return entry;
+
 }
 
-int find_max_parts(const char *dir_path) {
-    DIR *dir = opendir(dir_path);
-    if (!dir) return 0;
-
-    int max = 0;
-    struct dirent *entry;
-    while ((entry = readdir(dir)) != NULL) {
-        if (entry->d_name[0] == '.') continue;
-        ParsedFilename pf = parse_filename(entry->d_name);
-        if (pf.count > max) max = pf.count;
-    }
-
-    closedir(dir);
-    return max;
+void print_divider(void) {
+    printf("%-68s %-9s %-12s %-8s\n", "--------------------------------------------------------------------", "---------", "------------", "--------");
 }
 
 int main(int argc, char *argv[]) {
@@ -56,41 +93,22 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    // First pass: find the max number of parts to size the columns
-    int num_cols = find_max_parts(dir_path);
-    if (num_cols == 0) {
-        printf("No files found.\n");
-        closedir(dir);
-        return 0;
-    }
+    // Header
+    printf("%-68s %-9s %-12s %-8s %-20s\n", "Song", "Difficulty", "Score", "Rating", "DateTime");
+    print_divider();
 
-    // Print header row
-    printf("%-30s", "Filename");
-    for (int i = 0; i < num_cols; i++) {
-        printf("| Part %-2d ", i + 1);
-    }
-    printf("\n");
-
-    // Print divider
-    int divider_len = 40 + (num_cols * 10);
-    for (int i = 0; i < divider_len; i++) printf("-");
-    printf("\n");
-
-    // Second pass: print each file and its parts
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_name[0] == '.') continue;
 
-        ParsedFilename pf = parse_filename(entry->d_name);
+        scoreEntry sdvx = parse_files(entry->d_name);
 
-        printf("%-30s", entry->d_name);
-        for (int i = 0; i < num_cols; i++) {
-            if (i < pf.count)
-                printf("| %-8s ", pf.parts[i]);
-            else
-                printf("| %-8s ", "-");   // pad missing parts with a dash
+        if (!sdvx.valid) {
+            printf("[skipped: %s]\n", entry->d_name);
+            continue;
         }
-        printf("\n");
+
+        printf("%-68s %-9s %-12s %-8s %-20s\n", sdvx.song, sdvx.difficulty, sdvx.score, sdvx.rating, sdvx.datetime); 
     }
 
     closedir(dir);
